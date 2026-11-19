@@ -1,0 +1,36 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install redis-server
+        run: sudo apt-get update && sudo apt-get install -y redis-server
+      - run: pip install -r requirements-dev.txt
+      - run: pytest -q
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image (small corpus) and validate compose
+        run: |
+          docker build -f docker/Dockerfile --build-arg CORPUS_DOCS=20000 -t ddr:latest .
+          python docker/gen_compose.py --shards 2 --replicas 2 > docker-compose.ci.yml
+          docker compose -f docker-compose.ci.yml config -q
+      - name: Smoke test the stack
+        run: |
+          docker compose -f docker-compose.ci.yml up -d --wait
+          curl -fs 'localhost:8080/health'
+          curl -fs 'localhost:8080/search?q=test&k=3'
+          curl -fs 'localhost:8081/health'
+          docker compose -f docker-compose.ci.yml down
