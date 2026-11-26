@@ -16,6 +16,12 @@ For each query the router:
 5. merges per-shard top-k into a global top-k, flags ``partial`` results if a
    shard was unreachable, and writes complete results back to the cache.
 
+If Redis becomes unreachable the router **fails open** (:mod:`ddr.resilience`):
+it keeps routing on the last-known topology and its own load counts, skips the
+cache, ejects nodes that keep failing, and marks responses ``degraded``. When
+Redis answers again it re-publishes its load counts, re-reads the registry, and
+resumes normal operation.
+
 Environment
 -----------
 REDIS_URL       required
@@ -28,11 +34,14 @@ SHARD_TIMEOUT_MS
 CACHE_TTL_S     0 disables the result cache
 MAX_INFLIGHT    admission control: shed queries (fast 503) beyond this many
                 concurrent queries; 0 = unlimited
+REDIS_FAILOVER  1 (default) keeps serving while Redis is down; 0 fails closed
+REDIS_POOL_SIZE maximum Redis connections per router process (default 64)
 """
 
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextlib
 import hashlib
 import logging
@@ -40,22 +49,31 @@ import os
 import time
 from dataclasses import asdict, dataclass
 
-import collections
-
 import aiohttp
 import numpy as np
 import orjson
 import redis.asyncio as aioredis
 from fastapi import FastAPI, HTTPException, Query, Response
 from pydantic import BaseModel
+from redis.asyncio.retry import Retry
+from redis.backoff import NoBackoff
 
 from ..balancer import STRATEGIES, LoadBalancer
 from ..index import GlobalStats, merge_topk
-from ..registry import Registry, Topology
+from ..registry import HEARTBEAT_TTL, Registry, Topology
+from ..resilience import RedisCircuit, RedisUnavailable
 
 log = logging.getLogger("ddr.router")
 
 MODES = ("qtf", "dfs")
+
+# After Redis comes back, keep nodes the registry hasn't heard from again for this
+# long: they re-register on their next heartbeat.
+RECOVERY_HOLD_S = float(HEARTBEAT_TTL)
+
+
+def _env_flag(name: str, default: str = "1") -> bool:
+    return os.getenv(name, default).strip().lower() not in ("0", "false", "no", "off")
 
 
 @dataclass
@@ -67,6 +85,7 @@ class RouterConfig:
     shard_timeout_ms: float = float(os.getenv("SHARD_TIMEOUT_MS", "2000"))
     cache_ttl_s: int = int(os.getenv("CACHE_TTL_S", "0"))
     max_inflight: int = int(os.getenv("MAX_INFLIGHT", "0"))
+    redis_failover: bool = _env_flag("REDIS_FAILOVER")
 
 
 class ConfigUpdate(BaseModel):
@@ -77,6 +96,7 @@ class ConfigUpdate(BaseModel):
     shard_timeout_ms: float | None = None
     cache_ttl_s: int | None = None
     max_inflight: int | None = None
+    redis_failover: bool | None = None
     reset_stats: bool = False
 
 
@@ -91,7 +111,7 @@ class Metrics:
 
     def reset(self) -> None:
         self.requests = self.cache_hits = self.partial = self.hedges = self.retries = self.shard_failures = 0
-        self.shed = 0
+        self.shed = self.degraded = 0
 
     def to_dict(self) -> dict:
         return dict(vars(self))
@@ -129,27 +149,64 @@ class Router:
         self.r = r
         self.cfg = cfg
         self.registry = Registry(r, cluster)
-        self.lb = LoadBalancer(r, self.registry.ns, cfg.strategy)
+        self.circuit = RedisCircuit(r.ping, enabled=cfg.redis_failover)
+        self.circuit.on_recover(self._on_redis_recover)
+        self.lb = LoadBalancer(r, self.registry.ns, cfg.strategy, circuit=self.circuit)
         self.topo = Topology()
         self.metrics = Metrics()
         self.hedge = AdaptiveHedge()
         self.client: aiohttp.ClientSession | None = None  # created inside the event loop
         self.inflight = 0  # queries currently being served by this router process
+        self._hold_until = 0.0
 
     async def start(self) -> None:
         self.client = aiohttp.ClientSession(
             connector=aiohttp.TCPConnector(limit=0, limit_per_host=0, keepalive_timeout=60),
             json_serialize=lambda o: orjson.dumps(o).decode(),
         )
-        self.topo = await self.registry.topology()
+        await self.refresh()
 
+    async def close(self) -> None:
+        await self.circuit.close()
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(self.lb.drain(), 1.0)
+        await self.client.close()
+
+    # -- registry and shared state ------------------------------------------------
     async def refresh_loop(self, interval: float = 0.5) -> None:
         while True:
-            try:
-                self.topo = await self.registry.topology()
-            except Exception as e:
-                log.warning("topology refresh failed: %s", e)
+            await self.refresh()
             await asyncio.sleep(interval)
+
+    async def refresh(self) -> None:
+        """Re-read the registry and re-publish this router's load counts."""
+        if not self.circuit.available:
+            return  # Redis is down: keep routing on the last-known topology
+        try:
+            fresh = await self.circuit.call(self.registry.topology)
+            await self.circuit.call(self.lb.publish)
+        except RedisUnavailable:
+            return
+        except Exception as e:  # failover disabled and Redis down, or a transient error
+            log.warning("topology refresh failed: %s", e)
+            return
+        self._apply_topology(fresh)
+
+    def _apply_topology(self, fresh: Topology) -> None:
+        if time.monotonic() < self._hold_until:
+            fresh = self.topo.merged(fresh)
+        for node in fresh.nodes.keys() - self.topo.nodes.keys():
+            self.lb.forget(node)  # new or restarted node: judge it afresh
+        self.topo = fresh
+
+    async def _on_redis_recover(self) -> None:
+        """Runs once Redis answers again, before normal operation resumes."""
+        # Idle pooled connections may point at a Redis process that no longer exists.
+        await self.r.connection_pool.disconnect(inuse_connections=False)
+        await self.lb.publish()
+        fresh = await self.registry.topology()
+        self._hold_until = time.monotonic() + RECOVERY_HOLD_S
+        self._apply_topology(fresh)
 
     # -- one request to one node ------------------------------------------------
     async def _attempt(self, node_id: str, path: str, payload: dict) -> dict:
@@ -238,10 +295,14 @@ class Router:
         if self.topo.num_shards == 0:
             raise HTTPException(503, "no nodes registered")
         cache_key = None
-        if use_cache and self.cfg.cache_ttl_s > 0:
+        if use_cache and self.cfg.cache_ttl_s > 0 and self.circuit.available:
             norm = " ".join(sorted(set(q.lower().split())))
-            cache_key = f"{self.registry.ns}:cache:{mode}:{k}:{hashlib.sha1(norm.encode()).hexdigest()}"
-            hit = await self.r.get(cache_key)
+            key = f"{self.registry.ns}:cache:{mode}:{k}:{hashlib.sha1(norm.encode()).hexdigest()}"
+            try:
+                hit = await self.circuit.call(self.r.get, key)
+                cache_key = key
+            except RedisUnavailable:
+                hit = None  # serve uncached while Redis is down
             if hit is not None:
                 self.metrics.cache_hits += 1
                 out = orjson.loads(hit)
@@ -261,14 +322,28 @@ class Router:
             "query": q, "k": k, "mode": mode, "strategy": strategy,
             "num_shards": self.topo.num_shards, "failed_shards": failed_shards,
             "partial": bool(failed_shards), "cached": False,
+            # True when served without Redis: local load balancing, no cache.
+            "degraded": not self.circuit.available,
             "nodes": sorted(rep["node_id"] for rep in replies), "results": results,
         }
+        if out["degraded"]:
+            self.metrics.degraded += 1
         if out["partial"]:
             self.metrics.partial += 1
-        elif cache_key:
-            await self.r.set(cache_key, orjson.dumps(out), ex=self.cfg.cache_ttl_s)
+        elif cache_key and self.circuit.available:
+            with contextlib.suppress(RedisUnavailable):
+                await self.circuit.call(self.r.set, cache_key, orjson.dumps(out), ex=self.cfg.cache_ttl_s)
         out["took_ms"] = round((time.perf_counter() - t0) * 1e3, 3)
         return out
+
+    async def redis_state(self) -> str:
+        if self.cfg.redis_failover:
+            return "up" if self.circuit.available else "down"
+        try:  # no circuit to ask: check directly
+            await asyncio.wait_for(self.r.ping(), 0.5)
+            return "up"
+        except Exception:
+            return "down"
 
 
 R: Router | None = None
@@ -277,19 +352,21 @@ R: Router | None = None
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     global R
-    # Blocking pool: under bursts callers wait briefly for a connection instead of
-    # failing with MaxConnectionsError.
     pool = aioredis.BlockingConnectionPool.from_url(
         os.getenv("REDIS_URL", "redis://localhost:6379/0"),
-        max_connections=int(os.getenv("REDIS_POOL_SIZE", "64")), timeout=5)
+        max_connections=int(os.getenv("REDIS_POOL_SIZE", "64")),
+        timeout=5,                    # under bursts, wait briefly for a free connection
+        socket_connect_timeout=0.5,   # an unreachable Redis fails fast instead of hanging
+        socket_timeout=1.0,
+        retry=Retry(NoBackoff(), 1),  # one immediate retry, e.g. a stale pooled connection
+    )
     r = aioredis.Redis(connection_pool=pool)
     R = Router(r, os.getenv("CLUSTER", "distributed"), RouterConfig())
     await R.start()
     task = asyncio.create_task(R.refresh_loop())
     yield
     task.cancel()
-    await R.lb.drain()
-    await R.client.close()
+    await R.close()
     await r.aclose()
 
 
@@ -328,7 +405,9 @@ async def search(
 @app.get("/health")
 async def health() -> dict:
     missing = R.topo.missing_shards
-    return {"status": "ok" if R.topo.num_shards and not missing else "degraded",
+    redis_state = await R.redis_state()
+    ok = R.topo.num_shards and not missing and redis_state == "up"
+    return {"status": "ok" if ok else "degraded", "redis": redis_state,
             "num_shards": R.topo.num_shards, "missing_shards": missing, "nodes": len(R.topo.nodes)}
 
 
@@ -339,10 +418,17 @@ async def topology() -> dict:
 
 @app.get("/metrics")
 async def metrics() -> dict:
+    try:
+        inflight = await R.circuit.call(R.lb.inflight)
+    except Exception:
+        inflight = dict(R.lb.local)  # Redis down: this router's own view
     return {"router": R.metrics.to_dict(), "config": asdict(R.cfg),
             "adaptive_hedge_ms": round(R.hedge.threshold_ms, 3),
+            "redis": R.circuit.status(), "router_id": R.lb.router_id, "peer_routers": len(R.lb.peer_keys),
+            "local_picks": R.lb.local_picks, "ejected": R.lb.ejector.snapshot(),
+            "ejections": R.lb.ejector.total_ejections,
             "nodes": {n: s.to_dict() for n, s in sorted(R.lb.stats.items())},
-            "inflight": await R.lb.inflight()}
+            "inflight": inflight, "inflight_local": dict(R.lb.local)}
 
 
 @app.put("/admin/config")
@@ -354,6 +440,7 @@ async def set_config(u: ConfigUpdate) -> dict:
     for k, v in u.model_dump(exclude_none=True, exclude={"reset_stats"}).items():
         setattr(R.cfg, k, v)
     R.lb.strategy = R.cfg.strategy
+    R.circuit.enabled = R.cfg.redis_failover
     if u.reset_stats:
         R.metrics.reset()
         R.lb.stats.clear()
@@ -363,10 +450,15 @@ async def set_config(u: ConfigUpdate) -> dict:
 
 @app.post("/admin/cache/flush")
 async def flush_cache() -> dict:
-    n = 0
-    async for key in R.r.scan_iter(f"{R.registry.ns}:cache:*", count=1000):
-        n += await R.r.delete(key)
-    return {"deleted": n}
+    async def flush() -> int:
+        n = 0
+        async for key in R.r.scan_iter(f"{R.registry.ns}:cache:*", count=1000):
+            n += await R.r.delete(key)
+        return n
+    try:
+        return {"deleted": await R.circuit.call(flush)}
+    except RedisUnavailable:
+        raise HTTPException(503, "Redis is unavailable")
 
 
 @app.put("/admin/netem")

@@ -11,13 +11,15 @@ loadcurve   open-loop latency vs offered load (where each architecture saturates
 cache       Redis result cache under uniform vs Zipf-skewed query popularity
 quality     query-then-fetch (local stats) vs DFS (global stats): ranking
             agreement with a centralized index, and its latency cost
+chaos       crash Redis under load, crash a node while Redis is down, restart
+            both; routers with and without Redis failover
 
     python -m bench.run_benchmarks                  # everything (~20 min)
     python -m bench.run_benchmarks -e scaling -e network --duration 5
     python -m bench.run_benchmarks --quick          # smoke run (~4 min)
 
-Results go to ``results/results.json``; run ``python -m bench.plot`` for charts
-and the markdown summary.
+Results go to ``results/results.json`` (or ``--out``); run ``python -m bench.plot``
+for charts and the markdown summary.
 """
 
 from __future__ import annotations
@@ -36,18 +38,19 @@ from ddr.corpus import load, make_queries
 from ddr.index import GlobalStats, ShardIndex, merge_topk
 
 from .cluster import ROOT, LocalCluster
-from .loadgen import run_load
+from .loadgen import run_load, window_stats
 
 RESULTS = os.path.join(ROOT, "results", "results.json")
 
 
 class Bench:
-    def __init__(self, duration: float, quick: bool):
+    def __init__(self, duration: float, quick: bool, out: str = RESULTS):
         self.duration = duration
         self.quick = quick
+        self.out = out
         self.corpus = load(os.path.join(ROOT, "data", "corpus"))
         self.queries = make_queries(self.corpus, 5000)
-        self.results: dict = _load_results()
+        self.results: dict = _load_results(out)
 
     # -- helpers ---------------------------------------------------------------
     def load(self, url: str, **kw) -> dict:
@@ -76,13 +79,13 @@ class Bench:
         return httpx.get(c.router_url + "/metrics").json()
 
     def save(self, name: str, rows: list[dict], **meta) -> None:
+        env = {"cpus": os.cpu_count(), "python": platform.python_version(), "platform": platform.platform(),
+               "corpus_docs": self.corpus.num_docs, "corpus_tokens": int(len(self.corpus.tokens))}
         self.results[name] = {"rows": rows, **meta, "duration_s": self.duration,
-                              "finished": time.strftime("%Y-%m-%d %H:%M:%S")}
-        self.results["_env"] = {"cpus": os.cpu_count(), "python": platform.python_version(),
-                                "platform": platform.platform(), "corpus_docs": self.corpus.num_docs,
-                                "corpus_tokens": int(len(self.corpus.tokens))}
-        os.makedirs(os.path.dirname(RESULTS), exist_ok=True)
-        with open(RESULTS, "w") as f:
+                              "finished": time.strftime("%Y-%m-%d %H:%M:%S"), "env": env}
+        self.results["_env"] = env
+        os.makedirs(os.path.dirname(os.path.abspath(self.out)), exist_ok=True)
+        with open(self.out, "w") as f:
             json.dump(self.results, f, indent=2)
 
     @staticmethod
@@ -238,12 +241,54 @@ class Bench:
         self.save("quality", rows, latency=lat, queries=len(qs))
 
 
-EXPERIMENTS = ["scaling", "network", "balancing", "loadcurve", "cache", "quality"]
+    def chaos(self) -> None:
+        """Crash Redis under steady load, crash a node while Redis is still down, then
+        restart both. The same scenario runs against a router that fails closed
+        (REDIS_FAILOVER=0, the behaviour before failover existed) and one that fails open."""
+        k = 0.5 if self.quick else 1.0  # time scale
+        t_redis_down, t_node_down, t_redis_up, t_node_up, length = 8 * k, 12 * k, 20 * k, 26 * k, 34 * k
+        windows = [("steady state", 0, t_redis_down),
+                   ("Redis down", t_redis_down, t_node_down),
+                   ("Redis down + node crashed", t_node_down, t_redis_up),
+                   ("Redis back, node still down", t_redis_up, t_node_up),
+                   ("node restarted", t_node_up, length),
+                   ("whole run", 0, length)]
+        rate = 150
+        rows, timeline, events, routers = [], [], {}, {}
+        for name, failover in (("with failover", "1"), ("without failover", "0")):
+            with LocalCluster(4, 2, cluster="chaos", node_env={"NET_PROFILE": "datacenter"},
+                              router_env={"LB_STRATEGY": "latency_aware", "REDIS_FAILOVER": failover}) as c:
+                self.prime(c)
+                scenario = [(t_redis_down, "Redis crashes", c.kill_redis),
+                            (t_node_down, "node s1r0 crashes", lambda: c.kill_node("s1r0")),
+                            (t_redis_up, "Redis restarts (empty)", c.start_redis),
+                            (t_node_up, "node s1r0 restarts", lambda: c.start_node("s1r0"))]
+                r = asyncio.run(run_load(c.router_url, self.queries, duration=length, rate=rate, warmup=1.5,
+                                         timeout=5, params={"cache": "false"}, events=scenario,
+                                         timeline_bucket_s=1.0 * k))
+                m = self.router_metrics(c)
+                records = r.pop("records")
+                timeline += [{"variant": name, **row} for row in r.pop("timeline")]
+                events[name] = r.pop("events")
+                routers[name] = {"redis": m["redis"], "ejections": m["ejections"], "local_picks": m["local_picks"],
+                                 "retries": m["router"]["retries"], "degraded": m["router"]["degraded"]}
+                for window, t0, t1 in windows:
+                    rows.append({"variant": name, "window": window, "t0": t0, "t1": t1,
+                                 **window_stats(records, t0, t1)})
+                    w = rows[-1]
+                    self.log(f"chaos {name:16s} {window:28s} success={w['success_rate']} "
+                             f"p50={w['p50']} p99={w['p99']} degraded={w['degraded_share']}")
+                self.log(f"chaos {name}: router {routers[name]}")
+        self.save("chaos", rows, timeline=timeline, events=events, routers=routers, offered_rps=rate,
+                  topology="4 shards x 2 replicas", network="datacenter", strategy="latency_aware")
 
 
-def _load_results() -> dict:
-    if os.path.exists(RESULTS):
-        with open(RESULTS) as f:
+EXPERIMENTS = ["scaling", "network", "balancing", "loadcurve", "cache", "quality", "chaos"]
+
+
+def _load_results(path: str = RESULTS) -> dict:
+    if os.path.exists(path):
+        with open(path) as f:
             return json.load(f)
     return {}
 
@@ -253,16 +298,17 @@ def main() -> None:
     ap.add_argument("-e", "--experiment", action="append", choices=EXPERIMENTS)
     ap.add_argument("--duration", type=float, default=8.0, help="measured seconds per data point")
     ap.add_argument("--quick", action="store_true", help="short runs, fewer points")
+    ap.add_argument("--out", default=RESULTS, help="results file to update (default: results/results.json)")
     args = ap.parse_args()
     if not os.path.exists(os.path.join(ROOT, "data", "corpus", "vocab.txt")):
         raise SystemExit("corpus missing: run `python -m ddr.corpus build` first")
-    b = Bench(3.0 if args.quick else args.duration, args.quick)
+    b = Bench(3.0 if args.quick else args.duration, args.quick, args.out)
     for name in args.experiment or EXPERIMENTS:
         t0 = time.time()
         b.log(f"=== {name} ===")
         getattr(b, name)()
         b.log(f"=== {name} done in {time.time() - t0:.0f}s ===")
-    print(f"results written to {RESULTS}")
+    print(f"results written to {args.out}")
 
 
 if __name__ == "__main__":

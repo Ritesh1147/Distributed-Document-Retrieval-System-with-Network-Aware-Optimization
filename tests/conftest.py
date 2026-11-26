@@ -1,4 +1,3 @@
-import os
 import shutil
 import socket
 import subprocess
@@ -21,6 +20,51 @@ def corpus_path(tmp_path_factory):
 @pytest.fixture(scope="session")
 def corpus(corpus_path):
     return load(corpus_path)
+
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+class RedisProcess:
+    """A redis-server the test can crash and restart on the same port."""
+
+    def __init__(self) -> None:
+        self.exe = shutil.which("redis-server")
+        self.port = _free_port()
+        self.proc: subprocess.Popen | None = None
+
+    @property
+    def url(self) -> str:
+        return f"redis://127.0.0.1:{self.port}/0"
+
+    def start(self) -> None:
+        self.proc = subprocess.Popen([self.exe, "--port", str(self.port), "--save", "", "--appendonly", "no"],
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(200):
+            try:
+                socket.create_connection(("127.0.0.1", self.port), timeout=0.1).close()
+                return
+            except OSError:
+                time.sleep(0.02)
+        raise RuntimeError("redis-server did not start")
+
+    def kill(self) -> None:
+        if self.proc and self.proc.poll() is None:
+            self.proc.kill()
+            self.proc.wait()
+
+
+@pytest.fixture
+def restartable_redis():
+    if not shutil.which("redis-server"):
+        pytest.skip("redis-server not installed")
+    rp = RedisProcess()
+    rp.start()
+    yield rp
+    rp.kill()
 
 
 @pytest.fixture(scope="session")

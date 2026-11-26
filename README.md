@@ -26,10 +26,15 @@ centralized server as nodes are added and network conditions get worse.
   time, hedged requests when a shard call runs past the recent 95th-percentile
   response time, retries on another replica, admission control under overload,
   and partial results when a whole shard is down.
+- **Fault tolerance.** If Redis goes down, routers keep serving from their own
+  state (last-known topology, local load counts) and rejoin automatically when
+  it returns. Nodes that keep failing are taken out of rotation by the router
+  itself.
 - **Benchmarking.** Throughput, latency, and scalability from 1 to 8 nodes;
   six simulated network profiles (ideal, LAN, data center, cross-zone, WAN,
-  lossy); steady, Poisson, and bursty workloads; and ranking quality compared
-  with a centralized index.
+  lossy); steady, Poisson, and bursty workloads; ranking quality compared with a
+  centralized index; and a failure scenario that crashes Redis and a node under
+  load.
 
 ## Architecture
 
@@ -66,12 +71,15 @@ relative comparisons matter more than the absolute numbers.
 | p99 latency over a simulated WAN, with vs. without hedged requests | **2× lower** (131 vs. 262 ms) |
 | p99 latency past capacity (600 queries/s offered), with vs. without admission control | **40× lower** (122 ms vs. 4.9 s) |
 | Redis result cache on realistic, skewed query traffic | **4.7× higher** throughput, 89% hit rate |
+| Queries answered during a 12-second Redis outage with a node crash, with vs. without failover | **100% vs. 0%** |
 
 ![Throughput by topology and per-query latency](results/plots/scaling.png)
 
 ![p99 latency and traffic share by load-balancing strategy on heterogeneous replicas](results/plots/balancing.png)
 
 ![p50, p95 and p99 latency by network profile, centralized vs. distributed](results/plots/network.png)
+
+![Share of queries answered and p99 latency per second through a Redis outage and a node crash](results/plots/chaos.png)
 
 **Trade-offs the benchmarks surfaced**
 
@@ -86,6 +94,10 @@ relative comparisons matter more than the absolute numbers.
 - **Exact ranking costs a round trip.** Collecting global term statistics first
   makes distributed results identical to the centralized index, at +12 ms in a
   data center and +56 ms over a WAN.
+- **Coordination shouldn't be a single point of failure.** With Redis on the
+  request path, its outage failed every query. Failing open on local state kept
+  every query answered at unchanged median latency, but it only works because
+  each router's shared load counts repair themselves when Redis returns.
 
 Full analysis: [docs/BENCHMARKS.md](docs/BENCHMARKS.md) · All tables:
 [results/RESULTS.md](results/RESULTS.md)
@@ -112,7 +124,7 @@ python -m bench.cluster --shards 4 --replicas 2   # starts Redis, nodes, and rou
 
 ```bash
 python -m bench.run_benchmarks && python -m bench.plot   # ~20 min, writes results/
-pytest -q                                                # 49 unit and end-to-end tests
+pytest -q                                                # 67 unit and end-to-end tests
 ```
 
 ## Project structure

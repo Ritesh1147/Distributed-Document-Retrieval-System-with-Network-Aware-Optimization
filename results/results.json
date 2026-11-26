@@ -485,12 +485,19 @@
     "network": "datacenter",
     "strategy": "least_conn",
     "duration_s": 8.0,
-    "finished": "2026-11-19 02:36:41"
+    "finished": "2026-11-19 02:36:41",
+    "env": {
+      "cpus": 4,
+      "python": "3.13.18",
+      "platform": "Linux-6.18.44-fc-v653-x86_64-with-glibc2.39",
+      "corpus_docs": 500000,
+      "corpus_tokens": 66205579
+    }
   },
   "_env": {
     "cpus": 4,
     "python": "3.13.18",
-    "platform": "Linux-6.18.44-fc-v653-x86_64-with-glibc2.39",
+    "platform": "Linux-6.18.44-fc-v880-x86_64-with-glibc2.39",
     "corpus_docs": 500000,
     "corpus_tokens": 66205579
   },
@@ -1051,7 +1058,14 @@
     ],
     "offered_rps": 100,
     "duration_s": 8.0,
-    "finished": "2026-11-19 02:41:01"
+    "finished": "2026-11-19 02:41:01",
+    "env": {
+      "cpus": 4,
+      "python": "3.13.18",
+      "platform": "Linux-6.18.44-fc-v653-x86_64-with-glibc2.39",
+      "corpus_docs": 500000,
+      "corpus_tokens": 66205579
+    }
   },
   "balancing": {
     "rows": [
@@ -1378,7 +1392,14 @@
       "r2": "cross-zone network (5ms +/-2ms, 0.1% loss)"
     },
     "duration_s": 8.0,
-    "finished": "2026-11-19 02:43:35"
+    "finished": "2026-11-19 02:43:35",
+    "env": {
+      "cpus": 4,
+      "python": "3.13.18",
+      "platform": "Linux-6.18.44-fc-v653-x86_64-with-glibc2.39",
+      "corpus_docs": 500000,
+      "corpus_tokens": 66205579
+    }
   },
   "loadcurve": {
     "rows": [
@@ -1818,7 +1839,14 @@
     "network": "datacenter",
     "latency_note": "latency of complete answers only",
     "duration_s": 8.0,
-    "finished": "2026-11-19 02:47:57"
+    "finished": "2026-11-19 02:47:57",
+    "env": {
+      "cpus": 4,
+      "python": "3.13.18",
+      "platform": "Linux-6.18.44-fc-v653-x86_64-with-glibc2.39",
+      "corpus_docs": 500000,
+      "corpus_tokens": 66205579
+    }
   },
   "cache": {
     "rows": [
@@ -1898,7 +1926,14 @@
     "ttl_s": 300,
     "query_pool": 5000,
     "duration_s": 8.0,
-    "finished": "2026-11-19 02:48:41"
+    "finished": "2026-11-19 02:48:41",
+    "env": {
+      "cpus": 4,
+      "python": "3.13.18",
+      "platform": "Linux-6.18.44-fc-v653-x86_64-with-glibc2.39",
+      "corpus_docs": 500000,
+      "corpus_tokens": 66205579
+    }
   },
   "quality": {
     "rows": [
@@ -2007,6 +2042,1002 @@
     ],
     "queries": 500,
     "duration_s": 8.0,
-    "finished": "2026-11-19 02:50:09"
+    "finished": "2026-11-19 02:50:09",
+    "env": {
+      "cpus": 4,
+      "python": "3.13.18",
+      "platform": "Linux-6.18.44-fc-v653-x86_64-with-glibc2.39",
+      "corpus_docs": 500000,
+      "corpus_tokens": 66205579
+    }
+  },
+  "chaos": {
+    "rows": [
+      {
+        "variant": "with failover",
+        "window": "steady state",
+        "t0": 0,
+        "t1": 8.0,
+        "requests": 1177,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.00255,
+        "p50": 15.814,
+        "p99": 49.441
+      },
+      {
+        "variant": "with failover",
+        "window": "Redis down",
+        "t0": 8.0,
+        "t1": 12.0,
+        "requests": 604,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 1.0,
+        "p50": 15.268,
+        "p99": 77.533
+      },
+      {
+        "variant": "with failover",
+        "window": "Redis down + node crashed",
+        "t0": 12.0,
+        "t1": 20.0,
+        "requests": 1202,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 1.0,
+        "p50": 13.161,
+        "p99": 69.502
+      },
+      {
+        "variant": "with failover",
+        "window": "Redis back, node still down",
+        "t0": 20.0,
+        "t1": 26.0,
+        "requests": 865,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.01387,
+        "p50": 15.064,
+        "p99": 45.76
+      },
+      {
+        "variant": "with failover",
+        "window": "node restarted",
+        "t0": 26.0,
+        "t1": 34.0,
+        "requests": 1210,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 18.786,
+        "p99": 104.303
+      },
+      {
+        "variant": "with failover",
+        "window": "whole run",
+        "t0": 0,
+        "t1": 34.0,
+        "requests": 5058,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.36002,
+        "p50": 15.371,
+        "p99": 78.345
+      },
+      {
+        "variant": "without failover",
+        "window": "steady state",
+        "t0": 0,
+        "t1": 8.0,
+        "requests": 1177,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 19.196,
+        "p99": 106.678
+      },
+      {
+        "variant": "without failover",
+        "window": "Redis down",
+        "t0": 8.0,
+        "t1": 12.0,
+        "requests": 604,
+        "success_rate": 0.0,
+        "error_rate": 1.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": null,
+        "p99": null
+      },
+      {
+        "variant": "without failover",
+        "window": "Redis down + node crashed",
+        "t0": 12.0,
+        "t1": 20.0,
+        "requests": 1202,
+        "success_rate": 0.0,
+        "error_rate": 1.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": null,
+        "p99": null
+      },
+      {
+        "variant": "without failover",
+        "window": "Redis back, node still down",
+        "t0": 20.0,
+        "t1": 26.0,
+        "requests": 865,
+        "success_rate": 0.90636,
+        "error_rate": 0.09364,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 15.165,
+        "p99": 76.987
+      },
+      {
+        "variant": "without failover",
+        "window": "node restarted",
+        "t0": 26.0,
+        "t1": 34.0,
+        "requests": 1209,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 17.457,
+        "p99": 56.939
+      },
+      {
+        "variant": "without failover",
+        "window": "whole run",
+        "t0": 0,
+        "t1": 34.0,
+        "requests": 5057,
+        "success_rate": 0.62685,
+        "error_rate": 0.37315,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 17.32,
+        "p99": 97.687
+      }
+    ],
+    "timeline": [
+      {
+        "variant": "with failover",
+        "t": 0.0,
+        "requests": 145,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 16.66,
+        "p99": 39.864
+      },
+      {
+        "variant": "with failover",
+        "t": 1.0,
+        "requests": 149,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 17.397,
+        "p99": 53.664
+      },
+      {
+        "variant": "with failover",
+        "t": 2.0,
+        "requests": 150,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 15.828,
+        "p99": 52.123
+      },
+      {
+        "variant": "with failover",
+        "t": 3.0,
+        "requests": 137,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 14.675,
+        "p99": 41.795
+      },
+      {
+        "variant": "with failover",
+        "t": 4.0,
+        "requests": 133,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 14.951,
+        "p99": 36.663
+      },
+      {
+        "variant": "with failover",
+        "t": 5.0,
+        "requests": 165,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 17.982,
+        "p99": 50.427
+      },
+      {
+        "variant": "with failover",
+        "t": 6.0,
+        "requests": 138,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 13.646,
+        "p99": 40.378
+      },
+      {
+        "variant": "with failover",
+        "t": 7.0,
+        "requests": 160,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.01875,
+        "p50": 15.839,
+        "p99": 34.09
+      },
+      {
+        "variant": "with failover",
+        "t": 8.0,
+        "requests": 128,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 1.0,
+        "p50": 14.626,
+        "p99": 54.644
+      },
+      {
+        "variant": "with failover",
+        "t": 9.0,
+        "requests": 166,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 1.0,
+        "p50": 15.903,
+        "p99": 43.663
+      },
+      {
+        "variant": "with failover",
+        "t": 10.0,
+        "requests": 167,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 1.0,
+        "p50": 15.801,
+        "p99": 87.257
+      },
+      {
+        "variant": "with failover",
+        "t": 11.0,
+        "requests": 143,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 1.0,
+        "p50": 14.597,
+        "p99": 71.203
+      },
+      {
+        "variant": "with failover",
+        "t": 12.0,
+        "requests": 160,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 1.0,
+        "p50": 13.262,
+        "p99": 37.603
+      },
+      {
+        "variant": "with failover",
+        "t": 13.0,
+        "requests": 146,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 1.0,
+        "p50": 13.242,
+        "p99": 32.538
+      },
+      {
+        "variant": "with failover",
+        "t": 14.0,
+        "requests": 146,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 1.0,
+        "p50": 12.615,
+        "p99": 34.066
+      },
+      {
+        "variant": "with failover",
+        "t": 15.0,
+        "requests": 160,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 1.0,
+        "p50": 16.076,
+        "p99": 81.853
+      },
+      {
+        "variant": "with failover",
+        "t": 16.0,
+        "requests": 149,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 1.0,
+        "p50": 11.949,
+        "p99": 24.485
+      },
+      {
+        "variant": "with failover",
+        "t": 17.0,
+        "requests": 129,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 1.0,
+        "p50": 12.466,
+        "p99": 32.309
+      },
+      {
+        "variant": "with failover",
+        "t": 18.0,
+        "requests": 146,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 1.0,
+        "p50": 13.213,
+        "p99": 42.021
+      },
+      {
+        "variant": "with failover",
+        "t": 19.0,
+        "requests": 166,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 1.0,
+        "p50": 13.842,
+        "p99": 90.274
+      },
+      {
+        "variant": "with failover",
+        "t": 20.0,
+        "requests": 161,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.07453,
+        "p50": 13.924,
+        "p99": 45.077
+      },
+      {
+        "variant": "with failover",
+        "t": 21.0,
+        "requests": 131,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 14.666,
+        "p99": 38.704
+      },
+      {
+        "variant": "with failover",
+        "t": 22.0,
+        "requests": 155,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 17.083,
+        "p99": 49.847
+      },
+      {
+        "variant": "with failover",
+        "t": 23.0,
+        "requests": 138,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 14.69,
+        "p99": 35.21
+      },
+      {
+        "variant": "with failover",
+        "t": 24.0,
+        "requests": 158,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 14.621,
+        "p99": 46.317
+      },
+      {
+        "variant": "with failover",
+        "t": 25.0,
+        "requests": 122,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 15.413,
+        "p99": 31.828
+      },
+      {
+        "variant": "with failover",
+        "t": 26.0,
+        "requests": 151,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 22.292,
+        "p99": 76.439
+      },
+      {
+        "variant": "with failover",
+        "t": 27.0,
+        "requests": 173,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 36.47,
+        "p99": 115.976
+      },
+      {
+        "variant": "with failover",
+        "t": 28.0,
+        "requests": 159,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 28.986,
+        "p99": 63.663
+      },
+      {
+        "variant": "with failover",
+        "t": 29.0,
+        "requests": 144,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 16.016,
+        "p99": 35.817
+      },
+      {
+        "variant": "with failover",
+        "t": 30.0,
+        "requests": 136,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 15.578,
+        "p99": 43.811
+      },
+      {
+        "variant": "with failover",
+        "t": 31.0,
+        "requests": 148,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 14.549,
+        "p99": 35.024
+      },
+      {
+        "variant": "with failover",
+        "t": 32.0,
+        "requests": 151,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 15.681,
+        "p99": 36.578
+      },
+      {
+        "variant": "with failover",
+        "t": 33.0,
+        "requests": 148,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 15.027,
+        "p99": 33.062
+      },
+      {
+        "variant": "without failover",
+        "t": 0.0,
+        "requests": 145,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 16.482,
+        "p99": 43.217
+      },
+      {
+        "variant": "without failover",
+        "t": 1.0,
+        "requests": 149,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 18.264,
+        "p99": 46.28
+      },
+      {
+        "variant": "without failover",
+        "t": 2.0,
+        "requests": 150,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 18.629,
+        "p99": 131.932
+      },
+      {
+        "variant": "without failover",
+        "t": 3.0,
+        "requests": 137,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 32.572,
+        "p99": 117.244
+      },
+      {
+        "variant": "without failover",
+        "t": 4.0,
+        "requests": 133,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 14.996,
+        "p99": 47.438
+      },
+      {
+        "variant": "without failover",
+        "t": 5.0,
+        "requests": 165,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 25.156,
+        "p99": 65.022
+      },
+      {
+        "variant": "without failover",
+        "t": 6.0,
+        "requests": 138,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 15.808,
+        "p99": 47.775
+      },
+      {
+        "variant": "without failover",
+        "t": 7.0,
+        "requests": 160,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 22.275,
+        "p99": 103.714
+      },
+      {
+        "variant": "without failover",
+        "t": 8.0,
+        "requests": 128,
+        "success_rate": 0.0,
+        "error_rate": 1.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": null,
+        "p99": null
+      },
+      {
+        "variant": "without failover",
+        "t": 9.0,
+        "requests": 166,
+        "success_rate": 0.0,
+        "error_rate": 1.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": null,
+        "p99": null
+      },
+      {
+        "variant": "without failover",
+        "t": 10.0,
+        "requests": 167,
+        "success_rate": 0.0,
+        "error_rate": 1.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": null,
+        "p99": null
+      },
+      {
+        "variant": "without failover",
+        "t": 11.0,
+        "requests": 143,
+        "success_rate": 0.0,
+        "error_rate": 1.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": null,
+        "p99": null
+      },
+      {
+        "variant": "without failover",
+        "t": 12.0,
+        "requests": 160,
+        "success_rate": 0.0,
+        "error_rate": 1.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": null,
+        "p99": null
+      },
+      {
+        "variant": "without failover",
+        "t": 13.0,
+        "requests": 146,
+        "success_rate": 0.0,
+        "error_rate": 1.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": null,
+        "p99": null
+      },
+      {
+        "variant": "without failover",
+        "t": 14.0,
+        "requests": 146,
+        "success_rate": 0.0,
+        "error_rate": 1.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": null,
+        "p99": null
+      },
+      {
+        "variant": "without failover",
+        "t": 15.0,
+        "requests": 160,
+        "success_rate": 0.0,
+        "error_rate": 1.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": null,
+        "p99": null
+      },
+      {
+        "variant": "without failover",
+        "t": 16.0,
+        "requests": 149,
+        "success_rate": 0.0,
+        "error_rate": 1.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": null,
+        "p99": null
+      },
+      {
+        "variant": "without failover",
+        "t": 17.0,
+        "requests": 129,
+        "success_rate": 0.0,
+        "error_rate": 1.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": null,
+        "p99": null
+      },
+      {
+        "variant": "without failover",
+        "t": 18.0,
+        "requests": 146,
+        "success_rate": 0.0,
+        "error_rate": 1.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": null,
+        "p99": null
+      },
+      {
+        "variant": "without failover",
+        "t": 19.0,
+        "requests": 166,
+        "success_rate": 0.0,
+        "error_rate": 1.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": null,
+        "p99": null
+      },
+      {
+        "variant": "without failover",
+        "t": 20.0,
+        "requests": 161,
+        "success_rate": 0.49689,
+        "error_rate": 0.50311,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 16.358,
+        "p99": 41.337
+      },
+      {
+        "variant": "without failover",
+        "t": 21.0,
+        "requests": 131,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 14.561,
+        "p99": 76.291
+      },
+      {
+        "variant": "without failover",
+        "t": 22.0,
+        "requests": 155,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 19.901,
+        "p99": 86.781
+      },
+      {
+        "variant": "without failover",
+        "t": 23.0,
+        "requests": 138,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 14.888,
+        "p99": 64.46
+      },
+      {
+        "variant": "without failover",
+        "t": 24.0,
+        "requests": 158,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 14.721,
+        "p99": 39.014
+      },
+      {
+        "variant": "without failover",
+        "t": 25.0,
+        "requests": 122,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 12.017,
+        "p99": 27.384
+      },
+      {
+        "variant": "without failover",
+        "t": 26.0,
+        "requests": 151,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 23.625,
+        "p99": 46.088
+      },
+      {
+        "variant": "without failover",
+        "t": 27.0,
+        "requests": 173,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 21.002,
+        "p99": 53.311
+      },
+      {
+        "variant": "without failover",
+        "t": 28.0,
+        "requests": 159,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 18.066,
+        "p99": 47.984
+      },
+      {
+        "variant": "without failover",
+        "t": 29.0,
+        "requests": 144,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 16.278,
+        "p99": 36.698
+      },
+      {
+        "variant": "without failover",
+        "t": 30.0,
+        "requests": 136,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 14.654,
+        "p99": 33.212
+      },
+      {
+        "variant": "without failover",
+        "t": 31.0,
+        "requests": 148,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 15.412,
+        "p99": 38.442
+      },
+      {
+        "variant": "without failover",
+        "t": 32.0,
+        "requests": 151,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 17.309,
+        "p99": 36.882
+      },
+      {
+        "variant": "without failover",
+        "t": 33.0,
+        "requests": 147,
+        "success_rate": 1.0,
+        "error_rate": 0.0,
+        "partial_rate": 0.0,
+        "degraded_share": 0.0,
+        "p50": 17.446,
+        "p99": 87.028
+      }
+    ],
+    "events": {
+      "with failover": [
+        {
+          "t": 8.003,
+          "event": "Redis crashes"
+        },
+        {
+          "t": 12.001,
+          "event": "node s1r0 crashes"
+        },
+        {
+          "t": 20.001,
+          "event": "Redis restarts (empty)"
+        },
+        {
+          "t": 26.0,
+          "event": "node s1r0 restarts"
+        }
+      ],
+      "without failover": [
+        {
+          "t": 8.0,
+          "event": "Redis crashes"
+        },
+        {
+          "t": 12.0,
+          "event": "node s1r0 crashes"
+        },
+        {
+          "t": 20.0,
+          "event": "Redis restarts (empty)"
+        },
+        {
+          "t": 26.0,
+          "event": "node s1r0 restarts"
+        }
+      ]
+    },
+    "routers": {
+      "with failover": {
+        "redis": {
+          "state": "up",
+          "failover": true,
+          "outages": 1,
+          "downtime_s": 12.045,
+          "last_error": "ConnectionError: Error 111 connecting to 127.0.0.1:47185. Connection refused."
+        },
+        "ejections": 4,
+        "local_picks": 7286,
+        "retries": 6,
+        "degraded": 1821
+      },
+      "without failover": {
+        "redis": {
+          "state": "up",
+          "failover": false,
+          "outages": 0,
+          "downtime_s": 0.0,
+          "last_error": null
+        },
+        "ejections": 1,
+        "local_picks": 0,
+        "retries": 4,
+        "degraded": 0
+      }
+    },
+    "offered_rps": 150,
+    "topology": "4 shards x 2 replicas",
+    "network": "datacenter",
+    "strategy": "latency_aware",
+    "duration_s": 8.0,
+    "finished": "2026-11-26 23:22:32",
+    "env": {
+      "cpus": 4,
+      "python": "3.13.18",
+      "platform": "Linux-6.18.44-fc-v880-x86_64-with-glibc2.39",
+      "corpus_docs": 500000,
+      "corpus_tokens": 66205579
+    }
   }
 }

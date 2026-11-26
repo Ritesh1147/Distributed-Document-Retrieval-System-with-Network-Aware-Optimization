@@ -43,10 +43,14 @@ class LocalCluster:
     procs: list[subprocess.Popen] = field(default_factory=list)
     router_url: str = ""
     node_urls: dict = field(default_factory=dict)
+    redis_port: int | None = None                      # set when this cluster runs its own Redis
+    redis_proc: subprocess.Popen | None = None
+    node_procs: dict = field(default_factory=dict)     # node_id -> current process
+    _node_specs: dict = field(default_factory=dict)    # node_id -> (args, env, log name)
 
-    def _spawn(self, args: list[str], env: dict, name: str) -> subprocess.Popen:
+    def _spawn(self, args: list[str], env: dict, name: str, append: bool = False) -> subprocess.Popen:
         full_env = {**os.environ, "PYTHONPATH": ROOT, **{k: str(v) for k, v in env.items()}}
-        log = open(os.path.join(ROOT, "results", "logs", f"{name}.log"), "w")
+        log = open(os.path.join(ROOT, "results", "logs", f"{name}.log"), "a" if append else "w")
         p = subprocess.Popen(args, env=full_env, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT,
                              start_new_session=True)
         self.procs.append(p)
@@ -55,11 +59,9 @@ class LocalCluster:
     def start(self, timeout: float = 120.0) -> "LocalCluster":
         os.makedirs(os.path.join(ROOT, "results", "logs"), exist_ok=True)
         if self.redis_url is None:
-            port = free_port()
-            self._spawn([shutil.which("redis-server") or "redis-server", "--port", str(port), "--save", "",
-                         "--appendonly", "no"], {}, f"redis-{self.cluster}")
-            self.redis_url = f"redis://127.0.0.1:{port}/0"
-            _wait(lambda: socket.create_connection(("127.0.0.1", port), timeout=0.2).close(), 10)
+            self.redis_port = free_port()
+            self.start_redis()
+            self.redis_url = f"redis://127.0.0.1:{self.redis_port}/0"
         import redis
         r = redis.from_url(self.redis_url)
         for key in r.scan_iter(f"ddr:{self.cluster}:*"):
@@ -74,9 +76,11 @@ class LocalCluster:
                 env = {"NODE_ID": node_id, "SHARD_ID": s, "NUM_SHARDS": self.shards, "CLUSTER": self.cluster,
                        "ADVERTISE_URL": url, "REDIS_URL": self.redis_url, "CORPUS_PATH": self.corpus,
                        "ZONE": f"zone{rep}", **self.node_env, **self.per_node_env.get(node_id, {})}
-                self._spawn([sys.executable, "-m", "uvicorn", "ddr.node.app:app", "--host", "127.0.0.1",
-                             "--port", str(port), "--log-level", "warning", "--no-access-log"],
-                            env, f"{self.cluster}-{node_id}")
+                self._node_specs[node_id] = (
+                    [sys.executable, "-m", "uvicorn", "ddr.node.app:app", "--host", "127.0.0.1",
+                     "--port", str(port), "--log-level", "warning", "--no-access-log"],
+                    env, f"{self.cluster}-{node_id}")
+                self.start_node(node_id)
 
         port = free_port()
         self.router_url = f"http://127.0.0.1:{port}"
@@ -108,11 +112,43 @@ class LocalCluster:
                 os.killpg(p.pid, signal.SIGKILL)
         self.procs.clear()
 
+    # -- fault injection (failover tests, chaos benchmark) --------------------------
+    def start_redis(self) -> None:
+        """(Re)start this cluster's own Redis on the same port, with an empty dataset."""
+        if self.redis_port is None:
+            raise RuntimeError("this cluster uses an external Redis")
+        port = self.redis_port
+        self.redis_proc = self._spawn(
+            [shutil.which("redis-server") or "redis-server", "--port", str(port), "--save", "",
+             "--appendonly", "no"], {}, f"redis-{self.cluster}", append=self.redis_proc is not None)
+        _wait(lambda: socket.create_connection(("127.0.0.1", port), timeout=0.2).close(), 10)
+
+    def kill_redis(self) -> None:
+        """Crash Redis (SIGKILL): no clean shutdown, nothing saved."""
+        if self.redis_proc is None:
+            raise RuntimeError("this cluster uses an external Redis")
+        _kill(self.redis_proc)
+
+    def start_node(self, node_id: str) -> None:
+        """Start (or restart, on the same port) one shard node."""
+        args, env, name = self._node_specs[node_id]
+        self.node_procs[node_id] = self._spawn(args, env, name, append=node_id in self.node_procs)
+
+    def kill_node(self, node_id: str) -> None:
+        """Crash one shard node (SIGKILL)."""
+        _kill(self.node_procs[node_id])
+
     def __enter__(self) -> "LocalCluster":
         return self.start()
 
     def __exit__(self, *exc) -> None:
         self.stop()
+
+
+def _kill(p: subprocess.Popen) -> None:
+    if p.poll() is None:
+        os.killpg(p.pid, signal.SIGKILL)
+    p.wait()
 
 
 class _suppress:

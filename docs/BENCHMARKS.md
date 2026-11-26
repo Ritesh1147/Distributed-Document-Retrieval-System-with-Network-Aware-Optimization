@@ -1,9 +1,14 @@
 # Benchmarks
 
-What was measured, how, and what it showed. Every number here comes from one run
-of `python -m bench.run_benchmarks`. All tables are in
-[results/RESULTS.md](../results/RESULTS.md), and the raw data is in
-[results/results.json](../results/results.json).
+What was measured, how, and what it showed. Sections 1–6 come from one full run
+of `python -m bench.run_benchmarks`. Section 7 (failure handling) was added later
+and ran on its own, on a different machine of the same size (4 vCPUs), so its
+numbers are best compared within that section. On that machine, the code before
+and after the failover changes ran side by side, interleaved, with no
+measurable routing overhead: throughput differed by −3% to +6% across six
+configurations, less than repeated runs of the same code differed (up to 14%).
+All tables are in [results/RESULTS.md](../results/RESULTS.md), and the raw data
+is in [results/results.json](../results/results.json).
 
 ## Methodology
 
@@ -143,6 +148,44 @@ latency**.
   +56 ms (about 2×) over the WAN. That makes it a network-dependent trade-off
   between exact ranking and latency.
 
+## 7. Failure handling: a Redis outage and a node crash
+
+![Share of queries answered completely and p99 latency per second, through a Redis outage and a node crash](../results/plots/chaos.png)
+
+Setup: 4 shards × 2 replicas, latency-aware routing, 150 queries/s of open-loop
+Poisson load, data-center network. At 8 s Redis crashes; at 12 s a node crashes
+while Redis is still down; at 20 s Redis restarts with no data; at 26 s the node
+restarts. The same scenario runs against a router that fails closed
+(`REDIS_FAILOVER=0`, the behaviour before failover existed) and one that fails
+open.
+
+| phase | with failover: answered completely | p50 ms | without failover: answered completely | p50 ms |
+|---|---:|---:|---:|---:|
+| steady state (0–8 s) | 100% | 15.8 | 100% | 19.2 |
+| Redis down (8–12 s) | **100%** | 15.3 | **0%** | — |
+| Redis down, node crashed (12–20 s) | **100%** | 13.2 | **0%** | — |
+| Redis back, node still down (20–26 s) | 100% | 15.1 | 90.6% | 15.2 |
+| node restarted (26–34 s) | 100% | 18.8 | 100% | 17.5 |
+| whole run | **100%** | 15.4 | 62.7% | 17.3 |
+
+- **Without failover, every query fails for the whole 12 s outage.** Redis sits
+  on the request path (shared load counts, cache), so its errors become HTTP
+  500s. Recovery then takes about another second, because the restarted Redis
+  is empty until every node has re-registered.
+- **With failover, every query in the run was answered completely.** The router
+  switched to degraded mode on the first failed Redis call and served 1,821
+  queries from local state. It was back on shared state within a fraction of a
+  second of Redis returning, so its time in degraded mode (12.0 s) matched the
+  outage.
+- **The router routed around the crashed node without help from the
+  registry.** The crash cost 6 retried shard calls in total: the node was
+  ejected after its first failures, and single trial requests kept it out until
+  it left the topology.
+- **Latency was unaffected.** Median latency per second stayed at 12–16 ms
+  during the outage, against 14–18 ms before it, and the node crash caused no
+  visible spike. Both runs slow down for 2–3 s when the node restarts, because
+  building its index competes for the host's 4 cores.
+
 ## Takeaways
 
 1. **Distribute for throughput, replicate for headroom.** Sharding beyond the
@@ -158,6 +201,10 @@ latency**.
    goodput at a fraction of the latency.
 5. **Cache the head of the distribution.** Real query traffic is skewed, and one
    Redis lookup can replace the whole fan-out.
+6. **Keep the coordination layer off the critical path.** Redis holds no search
+   data, so the router fails open on local state instead of failing every query.
+   Making the shared load counts repair themselves is what lets it rejoin
+   cleanly afterwards.
 
 ## Reproducing
 
@@ -169,4 +216,4 @@ python -m bench.run_benchmarks -e balancing --quick      # one experiment, short
 python -m bench.loadgen http://localhost:8080 --concurrency 32 --duration 10 --zipf 1.1
 ```
 
-Experiments: `scaling`, `network`, `balancing`, `loadcurve`, `cache`, `quality`.
+Experiments: `scaling`, `network`, `balancing`, `loadcurve`, `cache`, `quality`, `chaos`.

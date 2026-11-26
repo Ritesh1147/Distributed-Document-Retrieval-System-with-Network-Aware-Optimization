@@ -33,4 +33,18 @@ jobs:
           curl -fs 'localhost:8080/health'
           curl -fs 'localhost:8080/search?q=test&k=3'
           curl -fs 'localhost:8081/health'
-          docker compose -f docker-compose.ci.yml down
+      - name: Keep serving while Redis is down, then recover
+        run: |
+          docker compose -f docker-compose.ci.yml stop redis
+          curl -fs 'localhost:8080/search?q=test&k=3' | tee /dev/stderr | grep -q '"degraded":true'
+          curl -fs 'localhost:8080/health' | grep -q '"redis":"down"'
+          docker compose -f docker-compose.ci.yml start redis
+          for i in $(seq 1 40); do
+            curl -fs 'localhost:8080/health' | grep -q '"redis":"up"' && break
+            sleep 0.5
+          done
+          curl -fs 'localhost:8080/health' | tee /dev/stderr | grep -q '"redis":"up"'
+          curl -fs 'localhost:8080/search?q=test&k=3' | grep -q '"degraded":false'
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.ci.yml down

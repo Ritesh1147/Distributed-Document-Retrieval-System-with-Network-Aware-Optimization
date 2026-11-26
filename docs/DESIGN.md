@@ -19,6 +19,10 @@ how to configure and operate it. For measurements, see
    whole shard was unreachable, the response is marked `partial: true` and is
    not cached. Complete responses are written back to the cache.
 
+If Redis is unreachable, steps 1 and 3 run without it: no cache, and replicas
+are chosen from the router's own load counts. See
+[Failure handling](#failure-handling).
+
 ## Components
 
 | Component | File | What it does |
@@ -27,7 +31,8 @@ how to configure and operate it. For measurements, see
 | Index | [`ddr/index.py`](../ddr/index.py) | Vectorised BM25 inverted index over one hash partition (`doc_id % num_shards`). Scores with **local** statistics (query-then-fetch) or with **global** statistics (DFS) passed in by the router. |
 | Shard node | [`ddr/node/app.py`](../ddr/node/app.py) | FastAPI service that owns one shard. It registers in Redis, sends a heartbeat every second with its load (in-flight requests, EWMA service time), and can be reconfigured at runtime (`/admin/netem`) to simulate network and hardware conditions. |
 | Router | [`ddr/router/app.py`](../ddr/router/app.py) | Runs the request lifecycle above: cache, optional DFS round, replica selection, fan-out with hedging and retries, top-k merge, partial results, admission control. |
-| Load balancer | [`ddr/balancer.py`](../ddr/balancer.py) | `random`, `round_robin`, `least_conn`, `p2c`, `latency_aware`. Selection and the in-flight increment run **atomically in one Redis Lua call for all shards of a query**, so many routers share one view of load without herding. |
+| Load balancer | [`ddr/balancer.py`](../ddr/balancer.py) | `random`, `round_robin`, `least_conn`, `p2c`, `latency_aware`. Selection and the in-flight increment run **atomically in one Redis Lua call for all shards of a query**, so many routers share one view of load without herding. Falls back to the router's own counts when Redis is down. |
+| Failure handling | [`ddr/resilience.py`](../ddr/resilience.py) | Circuit breaker around Redis, and per-node outlier ejection based on the router's own observations. |
 | Registry | [`ddr/registry.py`](../ddr/registry.py) | Node table and TTL heartbeats in Redis. A node whose heartbeat expires drops out of routing within 3 s. |
 | Network simulator | [`ddr/netsim.py`](../ddr/netsim.py) | Per-node delay, jitter, packet loss (modelled as a TCP retransmission timeout), bandwidth, and fault injection. Kernel `tc netem` is also available in Docker ([`docker/netem.sh`](../docker/netem.sh)). |
 
@@ -63,6 +68,55 @@ how to configure and operate it. For measurements, see
 - **Redis result cache.** Serves the popular head of the query distribution
   without touching the shards.
 
+## Failure handling
+
+Redis coordinates the cluster but holds no search data, so the router treats it
+as optional: losing Redis costs some optimisation, not availability.
+
+**Redis outage.** Every Redis call goes through a circuit breaker
+([`ddr/resilience.py`](../ddr/resilience.py)). The first connection error or
+timeout trips it, and from then on Redis calls are skipped instantly instead of
+each request waiting on a dead server. While the circuit is open, the router:
+
+- keeps routing on the **last-known topology**,
+- balances on **its own in-flight counts**, with the same strategy (round-robin
+  uses a local cursor),
+- **skips the result cache**, and
+- marks responses `degraded: true`.
+
+A background probe pings Redis every 0.5 s. When Redis answers, the router drops
+its stale pooled connections, re-publishes its exact in-flight counts, and
+re-reads the registry before closing the circuit. For 3 s after that it keeps
+nodes the registry hasn't heard from yet, since a restarted Redis is empty until
+each node's next heartbeat (nodes re-register every second). Setting
+`REDIS_FAILOVER=0` restores the old fail-closed behaviour, where every query
+fails while Redis is down.
+
+**Shared load counts that repair themselves.** Counting in-flight requests with
+increments and decrements in one shared hash breaks across failures. Decrements
+sent during an outage are lost, a Redis restart wipes the counts while requests
+are still in flight, and a router that crashes leaves its increments behind
+forever. Instead, each router owns a *slice*: a hash of its own in-flight
+counts, which the selection script sums across all live routers. Every 0.5 s the
+router overwrites its slice with its exact local counts and refreshes a 3 s
+expiry, so any drift is corrected within one interval and a crashed router's
+slice simply expires. Live routers are tracked in a sorted set scored by Redis
+server time, so router clocks don't need to agree.
+
+**Node failures.** While Redis is up, a dead node drops out of the registry once
+its heartbeat expires (within 3 s). The router doesn't wait for that, and while
+Redis is down it can't, so it also ejects nodes on its own: after 3 consecutive
+failed requests a node is skipped for 1 s. When the ejection ends the node gets
+one trial request; another failure ejects it for twice as long (up to 15 s), and
+one success clears its record. A shard's last replicas are never all skipped,
+since trying a suspect node beats failing outright. A node that re-joins the
+registry starts with a clean record.
+
+**Limits.** Redis itself runs as a single instance; production use would add
+replication and failover on the Redis side (for example Redis Sentinel or a
+managed Redis). While degraded, each router sees only its own load, so several
+routers can briefly pick the same replica, and cached results are unavailable.
+
 ## Redis key layout
 
 Each deployment uses its own namespace, `ddr:<cluster>`, so the distributed and
@@ -72,7 +126,8 @@ centralized clusters can share one Redis.
 |---|---|---|
 | `ddr:<cluster>:nodes` | hash | node id → JSON `{url, shard_id, num_shards, zone}` |
 | `ddr:<cluster>:hb:<node>` | string | latest load report; expires after 3 s |
-| `ddr:<cluster>:inflight` | hash | node id → in-flight requests, maintained by routers |
+| `ddr:<cluster>:inflight:<router>` | hash | node id → requests that router has in flight; expires 3 s after the router's last publish |
+| `ddr:<cluster>:routers` | sorted set | live router ids, scored by last publish time (Redis server clock) |
 | `ddr:<cluster>:rr:<shard>` | integer | shared round-robin cursor |
 | `ddr:<cluster>:cache:...` | string | cached query results |
 
@@ -105,6 +160,7 @@ the delay. A lost packet costs a 200 ms retransmission timeout.
 | `SHARD_TIMEOUT_MS` | `2000` | Timeout for one request to a node |
 | `CACHE_TTL_S` | `0` | Result cache lifetime; `0` = off |
 | `MAX_INFLIGHT` | `0` | Admission control limit per router process; `0` = off |
+| `REDIS_FAILOVER` | `1` | `1` keeps serving while Redis is down; `0` fails closed |
 | `REDIS_POOL_SIZE` | `64` | Maximum Redis connections per router process |
 
 **Shard node**
@@ -128,11 +184,11 @@ the delay. A lost packet costs a 200 ms retransmission timeout.
 
 | Endpoint | Description |
 |---|---|
-| `GET /search?q=&k=10` | Search. Optional `strategy=`, `mode=qtf\|dfs`, `hedge_ms=` (`-1` = adaptive), `cache=false` |
+| `GET /search?q=&k=10` | Search. Optional `strategy=`, `mode=qtf\|dfs`, `hedge_ms=` (`-1` = adaptive), `cache=false`. The response flags `partial` (a shard was unreachable) and `degraded` (served without Redis) |
 | `GET /topology` | Live nodes per shard, with each node's latest load report |
-| `GET /metrics` | Router counters, per-node EWMA RTT and errors, Redis in-flight counts, current hedge trigger |
-| `GET /health` | `ok`, or `degraded` when a shard has no live replica |
-| `PUT /admin/config` | Change `strategy`, `mode`, `hedge_ms`, `max_attempts`, `shard_timeout_ms`, `cache_ttl_s`, or `max_inflight` at runtime |
+| `GET /metrics` | Router counters, per-node EWMA RTT and errors, in-flight counts, current hedge trigger, Redis circuit state (outages, time degraded), ejected nodes |
+| `GET /health` | `ok`, or `degraded` when a shard has no live replica or Redis is down; includes `redis: up\|down` |
+| `PUT /admin/config` | Change `strategy`, `mode`, `hedge_ms`, `max_attempts`, `shard_timeout_ms`, `cache_ttl_s`, `max_inflight`, or `redis_failover` at runtime |
 | `PUT /admin/netem` | Apply network conditions (`profile`, `delay_ms`, `jitter_ms`, `loss`, `bandwidth_mbps`, `fail_rate`, `cpu_slowdown`) to some or all nodes |
 | `POST /admin/cache/flush` | Clear the result cache |
 
@@ -171,16 +227,33 @@ Or use kernel-level network emulation inside a container:
 docker compose exec dist-s0r1 netem.sh 20ms 5ms 1%
 ```
 
+Stop Redis and watch the router keep serving in degraded mode, then recover:
+
+```bash
+docker compose stop redis
+curl -s 'localhost:8080/search?q=dairkdark+geasjil' | jq '.degraded, .partial'   # true, false
+curl -s 'localhost:8080/health' | jq '.redis'                                    # "down"
+docker compose start redis
+```
+
 ## Testing
 
-`pytest -q` runs 49 tests:
+`pytest -q` runs 67 tests:
 
 - index correctness, including that sharded DFS scoring reproduces the
   centralized ranking exactly
 - network simulator statistics
-- load-balancer semantics: atomic selection, no herding across routers,
-  coalesced and retried releases
+- load-balancer semantics: atomic selection, routers seeing each other's load,
+  no herding, coalesced releases, crashed routers' counts expiring, lost updates
+  corrected by the next publish
+- failure handling: the circuit breaker trips, fails fast and recovers; node
+  ejection and back-off; every strategy working without Redis; exact shared
+  counts restored after a real Redis crash and restart
 - the Compose generator
 - end-to-end runs that start real router and node processes plus Redis, and
   check failover to a healthy replica, partial results when a shard is down,
   hedging around a slow replica, caching, and admission control
+- an end-to-end failure scenario: Redis crashes, then a node crashes while Redis
+  is down, then both restart. Every query must still complete, and the router
+  must recover on its own. A second test confirms that with `REDIS_FAILOVER=0`
+  the same outage fails every query.

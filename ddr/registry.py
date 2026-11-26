@@ -2,15 +2,19 @@
 
 Key layout (``ns`` = ``ddr:<cluster>``)::
 
-    {ns}:nodes             HASH  node_id -> JSON {url, shard_id, num_shards, zone}
-    {ns}:hb:{node_id}      STR   JSON load report, expires after HEARTBEAT_TTL
-    {ns}:inflight          HASH  node_id -> in-flight requests (router-maintained)
-    {ns}:rr:{shard}        INT   shared round-robin cursor
-    {ns}:cache:{...}       STR   cached query results
+    {ns}:nodes                 HASH  node_id -> JSON {url, shard_id, num_shards, zone}
+    {ns}:hb:{node_id}          STR   JSON load report, expires after HEARTBEAT_TTL
+    {ns}:inflight:{router_id}  HASH  node_id -> requests that router has in flight
+                                     (see ddr.balancer; expires if the router dies)
+    {ns}:routers               ZSET  live router ids, scored by last publish time
+    {ns}:rr:{shard}            INT   shared round-robin cursor
+    {ns}:cache:{...}           STR   cached query results
 
 A node is *alive* while its heartbeat key exists, so crashed nodes drop out of
 routing within ``HEARTBEAT_TTL`` seconds without any explicit deregistration.
-Several clusters (e.g. ``distributed`` and ``centralized``) can share one Redis.
+Nodes re-register on every heartbeat, so after a Redis restart the registry
+refills within one heartbeat interval. Several clusters (e.g. ``distributed``
+and ``centralized``) can share one Redis.
 """
 
 from __future__ import annotations
@@ -48,6 +52,14 @@ class Topology:
     nodes: dict[str, NodeInfo] = field(default_factory=dict)
     shards: dict[int, list[str]] = field(default_factory=dict)  # shard -> alive replica ids
 
+    def merged(self, newer: "Topology") -> "Topology":
+        """Union of two views, preferring ``newer`` for nodes in both. Used right after
+        Redis comes back, while nodes are still re-registering."""
+        t = Topology(num_shards=max(self.num_shards, newer.num_shards), nodes={**self.nodes, **newer.nodes})
+        for node_id in sorted(t.nodes):
+            t.shards.setdefault(t.nodes[node_id].shard_id, []).append(node_id)
+        return t
+
     @property
     def missing_shards(self) -> list[int]:
         return [s for s in range(self.num_shards) if not self.shards.get(s)]
@@ -78,7 +90,6 @@ class Registry:
         async with self.r.pipeline(transaction=False) as p:
             p.hdel(f"{self.ns}:nodes", node_id)
             p.delete(f"{self.ns}:hb:{node_id}")
-            p.hdel(f"{self.ns}:inflight", node_id)
             await p.execute()
 
     # -- router side -----------------------------------------------------------

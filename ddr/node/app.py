@@ -83,12 +83,20 @@ S = NodeState()
 
 
 async def _heartbeat_loop() -> None:
+    """Register and heartbeat every interval. Search keeps working without Redis, and
+    re-registering on every beat refills the registry as soon as Redis is back."""
+    healthy = True
     while True:
         try:
             await S.registry.register(NodeInfo(S.node_id, S.url, S.shard_id, S.num_shards, S.zone))
             await S.registry.heartbeat(S.node_id, S.load_report())
-        except Exception as e:  # keep serving even if Redis blips
-            log.warning("heartbeat failed: %s", e)
+            if not healthy:
+                log.warning("Redis reachable again: node %s re-registered", S.node_id)
+                healthy = True
+        except Exception as e:
+            if healthy:  # log once per outage, not every second
+                log.warning("heartbeat failed (%s); retrying every %.0fs", e, HEARTBEAT_INTERVAL)
+                healthy = False
         await asyncio.sleep(HEARTBEAT_INTERVAL)
 
 
@@ -103,14 +111,14 @@ async def lifespan(app: FastAPI):
     hb = None
     r = None
     if os.getenv("REDIS_URL"):
-        r = aioredis.from_url(os.environ["REDIS_URL"])
+        r = aioredis.from_url(os.environ["REDIS_URL"], socket_connect_timeout=0.5, socket_timeout=1.0)
         S.registry = Registry(r, S.cluster)
         hb = asyncio.create_task(_heartbeat_loop())
     yield
     if hb:
         hb.cancel()
         with contextlib.suppress(Exception):
-            await S.registry.deregister(S.node_id)
+            await asyncio.wait_for(S.registry.deregister(S.node_id), 1.0)
         await r.aclose()
 
 
